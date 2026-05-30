@@ -1,0 +1,1076 @@
+You are an academic paper writer. Generate a complete NEURIPS style paper
+based on the experiment results provided.
+
+════════════════════════════════════════════════════════════════════════════════
+                         IMPORTANT: BEFORE YOU START
+════════════════════════════════════════════════════════════════════════════════
+
+Before writing any content, you MUST complete these steps:
+
+1. READ THE SKILL: Review the paper-writer skill at .claude/skills/paper-writer/SKILL.md
+2. READ THE STYLE GUIDE: Study templates/paper_writing/lab_style_guide.md carefully
+3. REVIEW EXAMPLES: Browse paper_examples/ for formatting and language patterns:
+   - Look at sections/1.introduction.tex for language style
+   - Look at tables/*.tex for table formatting
+   - Look at commands/*.tex for macro usage
+4. VERIFY COMMAND TEMPLATES: Command templates (math.tex, general.tex, macros.tex) are pre-copied to paper_draft/commands/
+
+CRITICAL: Reference example papers for FORMATTING and LANGUAGE STYLE only.
+Do NOT copy content, phrasing, or narrative structure from the example papers.
+The examples are in a different research domain - focus only on presentation style.
+
+════════════════════════════════════════════════════════════════════════════════
+                            EXPERIMENT REPORT
+════════════════════════════════════════════════════════════════════════════════
+
+# Are repeated novel geometries addressable without reasoning?
+
+## 1. Executive Summary
+
+**Research question.** Given a novel 2D geometry presented as text, can an LLM
+verbally *address* it — name what's at a cell, locate a token, count, find the
+row with the most filled cells — and how does this depend on (a) the number of
+in-context demos about the same geometry and (b) whether the model is allowed
+to think step-by-step?
+
+**Headline finding.** On a controlled, fully-novel ASCII-grid task with two
+models (OpenAI `gpt-4.1-mini`, Anthropic `claude-haiku-4.5` via OpenRouter)
+and 80 procedurally-generated grids:
+
+> **Direct prompting plateaus at 79–93% even with K=8 same-grid demos; chain-of-thought lifts both models to 99–100% from K=0.** The gap is driven almost entirely by two question types — COUNT and ROWMAX — that require *scanning* the grid. POINT, LOOKUP, and NEIGHBOR queries are near-ceiling under both regimes. So *novel geometries are partially addressable without reasoning*: random-access queries (POINT, NEIGHBOR, LOOKUP) succeed directly, but aggregation queries (COUNT, ROWMAX) need an explicit reasoning trace, *not* more repetition.
+
+**Practical implication.** For workflows that ground LLMs in small ASCII /
+text-grid environments (UI screenshots-as-text, board games, ARC-style
+grids), enabling CoT is a much stronger lever than padding the context with
+identical-grid demonstrations — and the savings from "no CoT" don't survive
+the accuracy hit on aggregation queries.
+
+---
+
+## 2. Research Question & Motivation
+
+The Liu et al. paper (arXiv 2501.00070, "Sparks of Cognitive Flexibility")
+shows LLMs can pick up 2D-geometric structure from a few in-context
+(point, value) pairs. The motivating question for this study: once that
+in-context geometry is acquired, can the model *talk about* it — identify a
+cell, count a token, point to a row — without explicit step-by-step reasoning?
+And does the answer change when there isn't much repetition in the prompt?
+
+This sits in the unexplored intersection of three recent literatures:
+
+- **Curse of CoT** (Zheng et al. 2025): direct ≥ CoT on pattern-induction ICL.
+- **Forgotten Polygons** (Rudman et al. 2025): vision models fail on novel
+  shapes; structured labels rescue them.
+- **ICL from Repetitions** (Yan et al. 2024): self-reinforcement effects from
+  repeated in-context content.
+
+No prior work cleanly *factors* reasoning × repetition for verbal addressing
+of novel 2D shapes — that is the gap this report fills.
+
+---
+
+## 3. Experimental Setup
+
+### Task
+
+Procedurally-generated 7×7 ASCII grids, each containing one connected
+irregular shape grown by a random walk (size 6–12 cells), with cells coloured
+from the alphabet `{R, B, G, Y}` (`.` denotes empty). Each grid is identified
+by a SHA1 hash of its rendered string; no two grids in the experiment share
+the same shape.
+
+Five "addressing" question types, all with mechanical ground truth:
+
+| qtype    | Question stem                                                            |
+|----------|-------------------------------------------------------------------------|
+| POINT    | "What token is at row *r*, column *c*?" → single character              |
+| LOOKUP   | "What is the (row, column) of the first 'X' in row-major order?" → tuple |
+| COUNT    | "How many cells contain the token 'X'?" → integer                       |
+| ROWMAX   | "Which row index has the most non-empty cells?" → integer (smallest on tie) |
+| NEIGHBOR | "What token is directly to the right of the cell at row *r*, column *c*?" → char |
+
+### Conditions (full 2 × 2 × 5 factorial)
+
+| Factor      | Levels                                                       |
+|-------------|--------------------------------------------------------------|
+| Model       | `gpt-4.1-mini` (OpenAI), `claude-haiku-4.5` (Anthropic via OpenRouter) |
+| Reasoning   | `direct` (single-token answer) / `cot` ("think step by step ... Final answer:") |
+| Repetition K | 0, 1, 2, 4, 8 demo Q/A pairs about the **same** grid, drawn round-robin across the 5 qtypes, with the target question excluded |
+
+For each grid (n = 80), the target question is drawn round-robin across the
+5 qtypes; the demo pool of 8 demos is sampled once, and `demos[:K]` is used at
+each K, so K-wise comparisons are paired within item.
+
+Per-cell sample size n = 80; total queries = 80 × 5 × 2 × 2 = **1600**.
+
+### Models, params, prompts
+
+- Both models called with `temperature = 0.0`. Caching keyed by
+  `(provider, model, messages, params)` to make reruns free.
+- `direct` system prompt explicitly asks for answer-only output (max 24 tokens).
+- `cot` system prompt asks for brief reasoning ending in
+  `Final answer: <answer>` (max 256 tokens). A tolerant regex parses the final
+  answer for both conditions, accepting the *last* coord/integer/character.
+- Demo Q/A pairs are formatted identically across conditions; in CoT, demos use
+  the `A: Final answer: <answer>` form so the response format is consistent.
+
+### Statistical analysis
+
+- **Per-cell accuracy** with 95% bootstrap CIs (1000 resamples).
+- **Direct vs CoT**: paired McNemar exact test at each (model, K).
+- **K=0 vs K=8** within reasoning condition: paired McNemar.
+- **Trend**: Spearman ρ of K vs binary correctness.
+
+### Secondary: MiniARC sanity check
+
+25 MiniARC tasks (`code/cot_icl_eval/miniarc/miniarc.json`), standard
+ICL prompt (train pairs → test input), `direct` vs `cot` with the same
+two models. Used only as a cross-check that our basic setup reproduces
+known behaviour on a different task family. (See §5.)
+
+---
+
+## 4. Results
+
+### 4.1 Headline accuracy (table)
+
+Per-cell exact-match accuracy with 95% bootstrap CIs (n=80 per cell):
+
+| model            | reasoning | K=0                | K=1                | K=2                | K=4                | K=8                |
+|------------------|-----------|--------------------|--------------------|--------------------|--------------------|--------------------|
+| gpt-4.1-mini     | direct    | 0.788 [0.70, 0.88] | 0.812 [0.71, 0.90] | 0.825 [0.74, 0.90] | 0.850 [0.76, 0.93] | 0.875 [0.80, 0.94] |
+| gpt-4.1-mini     | **cot**   | **1.000 [1.00, 1.00]** | 0.988 [0.96, 1.00] | 0.988 [0.96, 1.00] | 1.000 [1.00, 1.00] | 1.000 [1.00, 1.00] |
+| claude-haiku-4.5 | direct    | 0.650 [0.55, 0.76] | 0.700 [0.60, 0.80] | 0.762 [0.68, 0.85] | 0.875 [0.80, 0.94] | 0.925 [0.88, 0.98] |
+| claude-haiku-4.5 | **cot**   | **0.938 [0.88, 0.99]** | 1.000 [1.00, 1.00] | 1.000 [1.00, 1.00] | 1.000 [1.00, 1.00] | 1.000 [1.00, 1.00] |
+
+(Full file: `results/summary_acc.csv`.)
+
+![Accuracy vs repetition](figures/repetition_curves.png)
+
+### 4.2 Direct vs CoT — paired McNemar at each K
+
+CoT beats direct at *every single* (model, K) cell. All ten paired tests are
+significant before correction (p ≤ 0.031), and nine of ten are significant
+after Bonferroni correction across the 10 tests (α=0.005).
+
+| model            | K | direct acc | cot acc | discordant (direct-only, cot-only) | McNemar p   |
+|------------------|---|-----------:|--------:|-----------------------------------:|------------:|
+| gpt-4.1-mini     | 0 |     0.788  |  1.000  |                            (0, 17) | 1.5e−05 ★   |
+| gpt-4.1-mini     | 1 |     0.812  |  0.988  |                            (1, 15) | 5.2e−04 ★   |
+| gpt-4.1-mini     | 2 |     0.825  |  0.988  |                            (0, 13) | 2.4e−04 ★   |
+| gpt-4.1-mini     | 4 |     0.850  |  1.000  |                            (0, 12) | 4.9e−04 ★   |
+| gpt-4.1-mini     | 8 |     0.875  |  1.000  |                            (0, 10) | 2.0e−03 ★   |
+| claude-haiku-4.5 | 0 |     0.650  |  0.938  |                            (2, 25) | 5.6e−06 ★   |
+| claude-haiku-4.5 | 1 |     0.700  |  1.000  |                            (0, 24) | 1.2e−07 ★   |
+| claude-haiku-4.5 | 2 |     0.763  |  1.000  |                            (0, 19) | 3.8e−06 ★   |
+| claude-haiku-4.5 | 4 |     0.875  |  1.000  |                            (0, 10) | 2.0e−03 ★   |
+| claude-haiku-4.5 | 8 |     0.925  |  1.000  |                             (0, 6) | 3.1e−02     |
+
+★ = significant after Bonferroni (α<sub>family</sub>=0.05, m=10 → α<sub>i</sub>=0.005). Full file: `results/mcnemar.csv`.
+
+### 4.3 Repetition: K=0 vs K=8 (within condition)
+
+For *direct* prompting, repetition matters; for *CoT* it doesn't (ceiling):
+
+| model            | reasoning | acc K=0 | acc K=8 | discordant (K0-only, K8-only) | McNemar p |
+|------------------|-----------|--------:|--------:|------------------------------:|----------:|
+| gpt-4.1-mini     | direct    |  0.788  |  0.875  |                        (1, 8) | 3.9e−02   |
+| gpt-4.1-mini     | cot       |  1.000  |  1.000  |                        (0, 0) | 1.000     |
+| claude-haiku-4.5 | direct    |  0.650  |  0.925  |                       (0, 22) | 4.8e−07 ★ |
+| claude-haiku-4.5 | cot       |  0.938  |  1.000  |                        (0, 5) | 6.3e−02   |
+
+Spearman trend (K vs correctness, per model × reasoning):
+
+| model            | reasoning | ρ      | p          |
+|------------------|-----------|--------|------------|
+| gpt-4.1-mini     | direct    |  0.080 |  0.110     |
+| gpt-4.1-mini     | cot       |  0.025 |  0.617     |
+| claude-haiku-4.5 | direct    | **0.249** | **4.8e−07** |
+| claude-haiku-4.5 | cot       |  0.159 |  0.001     |
+
+(Files: `results/mcnemar_repetition.csv`, `results/trend.csv`.)
+
+### 4.4 Where does direct prompting fail? — per-question-type breakdown
+
+This is the most informative slice of the data. Error rates by question type
+(pooled across K):
+
+| qtype    | gpt-4.1-mini direct | gpt-4.1-mini cot | claude-haiku-4.5 direct | claude-haiku-4.5 cot |
+|----------|--------------------:|-----------------:|------------------------:|---------------------:|
+| POINT    |               0.000 |            0.000 |                   0.075 |                0.013 |
+| LOOKUP   |               0.000 |            0.013 |                   0.087 |                0.000 |
+| NEIGHBOR |               0.050 |            0.000 |                   0.025 |                0.000 |
+| **COUNT** |          **0.675** |            0.013 |              **0.362** |                0.000 |
+| **ROWMAX**|          **0.125** |            0.000 |              **0.537** |                0.050 |
+
+![Per-qtype breakdown](figures/qtype_breakdown.png)
+
+The pattern is unmistakable: **direct prompting handles random-access queries
+(POINT, LOOKUP, NEIGHBOR) at near-ceiling accuracy, and falls off a cliff on
+aggregation queries (COUNT, ROWMAX) that require scanning the whole grid.** For
+gpt-4.1-mini, 54/80 direct-COUNT errors and 50/54 are off-by-one — the model
+is *trying* to count but loses track. CoT eliminates virtually all of these
+errors.
+
+### 4.5 Cost-normalised view
+
+CoT costs ~20–80× more output tokens (gpt-4.1-mini: 2 → 125 tokens/call;
+haiku: 8 → 180 tokens/call). Even so, the *accuracy* gap dominates: a 0.78 →
+1.00 jump on gpt-4.1-mini is large enough that no realistic value of token
+cost makes "direct" preferable on this task.
+
+![Accuracy vs cost](figures/cost_normalised.png)
+
+### 4.6 MiniARC sanity check
+
+25 tasks, same two models, no repetition manipulation:
+
+| model            | direct | cot   |
+|------------------|-------:|------:|
+| gpt-4.1-mini     |  0.240 | 0.120 |
+| claude-haiku-4.5 |  0.000 | 0.440 |
+
+Two notes: (a) `gpt-4.1-mini` shows the *opposite* pattern from the addressing
+task — direct outperforms CoT on rule induction, consistent with Curse-of-CoT.
+(b) `claude-haiku-4.5` essentially ignored our "direct only, no explanation"
+instruction on MiniARC and produced reasoning prose that our grid parser
+couldn't extract (`0/25` direct, `11/25` cot); this is a prompt-compliance
+failure, not a capability finding, but it underscores how task framing
+matters. The addressing task didn't have this problem — both models complied
+with the direct-only format there.
+
+So the picture is *not* "CoT always helps" — it depends on whether the task
+is rule induction (CoT can hurt) or addressing/scanning (CoT helps strongly).
+This refines, rather than contradicts, the Curse-of-CoT story.
+
+---
+
+## 5. Analysis & Discussion
+
+### 5.1 What this says about the original hypotheses
+
+| Hypothesis | Outcome |
+|---|---|
+| **H1** (repetition helps) | **Partially supported, condition-dependent.** Significant for direct prompting (especially for haiku: 0.65 → 0.925, p<10⁻⁶). For CoT, repetition adds nothing because CoT is already at ceiling. |
+| **H2** (direct ≥ CoT)     | **Refuted in this regime.** CoT > direct at every K cell for both models, with most paired McNemar p-values < 10⁻³. The "Curse of CoT" finding does **not** generalise from rule induction to verbal addressing. |
+| **H3** (low-repetition is hard) | **Refuted for CoT, supported for direct.** With CoT, both models are at ~94–100% at K=0. With direct prompting, low K is indeed worst (gpt-4.1-mini 0.79 at K=0; haiku 0.65 at K=0). |
+
+### 5.2 Why does CoT help here when Curse-of-CoT says it shouldn't?
+
+The mechanism is task-shape: our addressing task is not *rule induction*. The
+model isn't being asked to infer a transformation; the grid is given verbatim
+and the question asks for a verifiable property of that grid. For POINT /
+NEIGHBOR / LOOKUP the model can index into the prompt directly — and direct
+prompting works fine (≥95% accuracy). For COUNT and ROWMAX the model has to
+*scan*, accumulate, and aggregate — exactly the kind of operation that
+benefits from an externalised reasoning trace.
+
+This connects naturally to Sprague et al.'s observation that CoT helps
+substantially only on math + symbolic-execution tasks: COUNT and ROWMAX
+*are* symbolic-execution tasks (an iterative sweep + accumulator). LOOKUP
+and POINT *aren't* — they are lookup-table operations the model can do in
+its head.
+
+So the original Liu et al. "models learn 2D geometries in context" finding
+needs a corollary: **what kind of question you ask about that geometry matters
+more than how often you repeat it.** Aggregation queries need reasoning;
+random-access queries don't.
+
+### 5.3 Failure-mode taxonomy (direct prompting)
+
+From `results/error_breakdown.csv` (errors are pooled across K):
+
+- **COUNT errors are almost always off-by-one** — 50/54 for gpt-4.1-mini,
+  28/29 for haiku. The model can detect that a token is present but
+  miscounts occurrences. This is the textbook failure mode CoT was designed
+  to fix.
+- **ROWMAX errors come in two flavours**: the model picks a row that *contains*
+  the target token but isn't the densest, or it picks the largest *value* in
+  a row instead of largest *count*. 17/43 haiku ROWMAX errors were off-by-one
+  row index.
+- **POINT / NEIGHBOR / LOOKUP errors are rare and look like single-cell
+  reading slips** (e.g. confusing `B` with `G` in dense regions). No clear
+  pattern.
+
+### 5.4 Repetition does not bridge the COUNT gap
+
+Even at K=8 same-grid demos, gpt-4.1-mini direct only reaches 0.44 on COUNT
+and haiku direct reaches 0.875. The demo Q/As include other COUNT examples
+about the same grid with correct answers, but the model still cannot
+generalise the counting procedure to a new token. Repetition lifts *base
+accuracy*; it does not install a counting procedure.
+
+---
+
+## 6. Limitations
+
+1. **Two models only.** Both are relatively small / "fast" models. Larger
+   reasoning models (o-series, Claude Sonnet 4.5, Gemini 2.5 Pro) likely
+   close more of the gap even without CoT — that's a planned follow-up.
+2. **Single grid size (7×7).** Bai et al.'s "Stuck in the Matrix" finds
+   accuracy collapses with grid scale; our results may be optimistic for
+   larger grids.
+3. **English-language tokens for cell colours.** The token alphabet
+   `{R, B, G, Y}` carries colour semantics; truly novel symbols (e.g.
+   non-ASCII glyphs) might behave differently.
+4. **Strict exact-match scoring on a tolerant parser.** Some CoT outputs
+   include intermediate counts that match the gold; we report only the
+   final-answer field, but this means a perfectly-reasoned answer with a
+   typo'd last line counts as wrong.
+5. **80 grids × 5 K × 2 reasoning = 80 paired observations per cell.**
+   Powered for the effects we report, but the K=1 vs K=2 contrasts in CoT
+   are noisy (one off-target answer flips the cell).
+6. **MiniARC sanity check is small (25 tasks) and one model failed to
+   comply with the "direct" format**, so the MiniARC numbers should be
+   read as direction-of-effect only, not as a benchmark.
+7. **No vision modality.** All grids are text. The Forgotten-Polygons story
+   about perceptual encoding doesn't apply here directly.
+
+---
+
+## 7. Conclusions & Next Steps
+
+**Answer to the title question.** *Partially.* On controlled, fully-novel
+2D ASCII grids:
+
+- **Random-access addressing** (point query, neighbour, first-occurrence
+  lookup) **is addressable without reasoning** at ≥95% accuracy with both
+  tested models, and modest amounts of in-context repetition raise floor
+  accuracy further.
+- **Aggregation addressing** (count, row-max) **is *not* addressable without
+  reasoning**: direct prompting fails 12–68% of the time depending on
+  qtype × model, and 8 repeated same-grid demos only partially close the
+  gap. Enabling CoT closes it almost entirely (≥99%).
+
+**For practitioners.** If you're letting an LLM ground decisions in a small
+text grid (UI dump, game board, ARC-style puzzle), enabling reasoning is
+the cheapest reliability win available. Padding the prompt with more
+same-grid demos has measurable but smaller effect.
+
+**For the literature.** The "Curse of CoT" generalisation that
+*direct ≥ CoT on ICL* does **not** extend to verbal addressing of novel
+geometries: CoT is strictly better here, driven by COUNT/ROWMAX-style
+aggregation. The picture is consistent with Sprague et al.'s "CoT helps on
+symbolic execution" once we recognise that scan-and-aggregate queries are a
+miniature form of symbolic execution.
+
+**Suggested follow-ups.**
+
+- Scale grids to 10×10 and 15×15 to test the Bai-et-al. degradation curve.
+- Add a "thinking budget" sweep on a reasoning-capable model (Claude
+  Sonnet 4.5 with extended thinking) to see whether the COUNT/ROWMAX
+  failure decays with thinking tokens.
+- Replace COUNT with a *bounded-arithmetic* variant ("how many *more* X than
+  Y are there?") to test whether the failure is counting or arithmetic.
+- Try a *structured* representation (PVD / SVG-like vertex list, à la
+  VDLM) as a third axis — does it eliminate the direct/CoT gap?
+
+---
+
+## Reproducibility
+
+All code, data, and analysis live in this workspace:
+
+```
+src/
+  geometry.py         # task generator + oracle
+  prompting.py        # prompt builder + tolerant answer parser
+  llm_client.py       # cached LLM client (OpenAI + OpenRouter)
+  run_experiment.py   # primary 2x2x5 sweep driver
+  run_miniarc.py      # secondary MiniARC sanity check
+  analyze.py          # tables, McNemar, plots
+results/
+  main.csv            # 1600 raw model outputs
+  miniarc.csv         # 100 raw model outputs
+  summary_acc.csv     # per-cell accuracy with CIs
+  mcnemar.csv         # direct vs cot, paired, per (model, K)
+  mcnemar_repetition.csv # K=0 vs K=8, paired, per (model, reasoning)
+  trend.csv, error_breakdown.csv, summary.json
+  llm_cache/          # disk cache (re-running is free)
+figures/              # the three plots embedded above
+planning.md           # pre-registered plan
+```
+
+Random seeds are pinned (`grid_seed = 10_000 + i`,
+`temperature = 0.0`); the cache makes repeated runs deterministic. Total API
+cost for the published numbers: ~$1.50 (gpt-4.1-mini ~$0.50,
+claude-haiku-4.5 via OpenRouter ~$1.00).
+
+
+════════════════════════════════════════════════════════════════════════════════
+                            RESEARCH PLAN
+════════════════════════════════════════════════════════════════════════════════
+
+# Planning: Are repeated novel geometries addressable without reasoning?
+
+## Motivation & Novelty Assessment
+
+### Why This Research Matters
+The Liu et al. 2025 paper (arXiv 2501.00070, *Generative Patterns of Thought*-style work) shows
+LLMs can pick up 2D geometric structure from in-context input. But a follow-on,
+operationally useful capability is whether the model can *talk about* those geometries —
+locate a feature, name a cell value, point to a position. If the answer is "yes, with
+enough repetition, and without needing chain-of-thought," that has direct practical
+implications for grid-based tool use (UI grounding, ARC-style reasoning, board-game
+agents). If the answer is "no without explicit reasoning," it tells us that in-context
+geometry induction is *perceptual* rather than *symbolic* and downstream grounding
+needs scaffolding.
+
+### Gap in Existing Work
+From `literature_review.md`:
+- **Curse of CoT** (Zheng et al. 2025) shows direct ≥ CoT on ICL pattern tasks, but the
+  *repetition count* is treated as a confound, not an axis.
+- **ICL from Repetitions** (Yan et al. 2024) shows surface-level self-reinforcement
+  effects, but in pure generation, not in structured addressing.
+- **Forgotten Polygons / Stuck in the Matrix** (2025) show shape and grid failures, but
+  do not vary the amount of in-prompt repetition or perform a clean direct-vs-CoT
+  contrast on *novel* shapes presented as text.
+
+No existing paper holds the geometry fixed and varies (a) the number of in-prompt
+demonstrations *about the same geometry* and (b) whether the model is asked to reason.
+
+### Our Novel Contribution
+A focused 2×K factorial experiment on **verbal addressing of novel 2D grid shapes**:
+- Fix the geometry (a novel irregular shape on a small ASCII grid).
+- Vary `K`, the number of in-context demo Q&A pairs about that same grid.
+- Vary `reasoning ∈ {direct, CoT}`.
+- Measure: exact-match accuracy on held-out addressing questions about the *same* grid.
+- Cross-validate across two model families (OpenAI GPT-4.1-mini and an OpenRouter model)
+  to control for API idiosyncrasies.
+
+### Experiment Justification
+- **Experiment 1 (primary)** — Synthetic novel-shape addressing: We control novelty,
+  repetition count, and question type. Lets us isolate the effect of repetition and
+  reasoning cleanly. Predicted (from Yan et al. and Curse-of-CoT): accuracy rises
+  with K up to a few demos, CoT does not help and may hurt slightly.
+- **Experiment 2 (secondary, scaled-down sanity check)** — A small slice of MiniARC
+  with direct vs CoT prompting, no repetition manipulation, to confirm our setup
+  reproduces the Curse-of-CoT direction on real novel patterns.
+
+---
+
+## Research Question
+Can LLMs verbally address (refer to, locate, identify cell values within) novel 2D
+geometries presented in a prompt — and how does this ability change as a function of
+(a) the number of in-context demonstration questions about the same geometry and
+(b) whether explicit chain-of-thought reasoning is elicited?
+
+## Hypothesis Decomposition
+- **H1 (repetition helps).** Accuracy on a held-out addressing question about a fixed
+  novel geometry strictly increases with the number `K` of in-context demos about the
+  same geometry, up to a saturation point.
+- **H2 (direct ≥ CoT).** At every K, direct prompting matches or exceeds CoT prompting
+  in exact-match accuracy on these addressing tasks (a stronger version of Curse-of-CoT
+  on a controlled novel-geometry slice).
+- **H3 (low-repetition is hard).** At K=0 (zero demos) and K=1, accuracy on novel
+  geometries is substantially below ceiling, *even with* CoT — i.e. limited repetition
+  is the dominant constraint, more than reasoning.
+
+If H1+H2 both hold, the answer to the title is: **yes**, novel 2D geometries are
+addressable without reasoning, *provided* enough in-context repetition.
+
+## Proposed Methodology
+
+### Approach
+Build a synthetic, fully controlled task that mirrors the spirit of the Liu et al.
+2D-geometry-in-context paper, but where the *output* is a verbal/symbolic address
+rather than a continuous prediction. This lets us cleanly vary repetition and reasoning.
+
+### Experimental Steps
+
+1. **Task generator.** Procedurally generate novel "shapes" on a 7×7 grid using a
+   small alphabet of cell tokens (`.` for empty plus 2–4 non-empty tokens like `R`,
+   `B`, `G`). Each grid contains a connected, irregular polygon-like region of
+   non-empty tokens. We generate via random-walk shape growth so each shape is
+   distinct and almost-certainly out-of-training-distribution as a literal string.
+
+2. **Question types.** Five families of "addressing" questions about a grid:
+   - **POINT**: "What token is at row r, col c?" (answer: a single character)
+   - **LOOKUP**: "At which (row, col) is the token `X`?" (answer: coordinate)
+   - **COUNT**: "How many cells contain token `X`?" (integer)
+   - **ROWMAX**: "Which row has the most non-empty cells?" (integer)
+   - **NEIGHBOR**: "What is the token directly to the right of (r, c)?" (character)
+
+   All questions have a unique, mechanically-checkable ground-truth answer.
+
+3. **Prompt structure.** For each (grid, target-question) pair, build prompts of
+   the form:
+   ```
+   Grid:
+   . . R . . . .
+   . R R R . . .
+   ...
+   Q: <demo question 1>
+   A: <demo answer 1>
+   Q: <demo question 2>
+   A: <demo answer 2>
+   ...
+   Q: <target question>
+   A:
+   ```
+   The number of `(Q, A)` demos before the target is `K ∈ {0, 1, 2, 4, 8}`. All demo
+   questions are drawn from the same five families and all reference the *same* grid;
+   their answers are the mechanical ground truth.
+
+4. **Reasoning conditions.**
+   - **Direct**: just "A: <answer>". For CoT we instead use "A: Let's think step by
+     step. ... Final answer: <answer>" and an instruction in the system prompt.
+   - We parse the final answer with a tolerant regex that strips quotes / whitespace
+     and only accepts the *last* coordinate / character / integer that appears.
+
+5. **Novelty controls.**
+   - Each grid is procedurally generated with a fresh seed.
+   - We do **not** describe the shape verbally in the prompt (no "this is a heptagon").
+   - We use the same five non-empty tokens (`R`, `B`, `G`, `Y`) across grids so the
+     model cannot rely on remembering token-specific patterns — only the spatial
+     layout differs.
+
+6. **Models.**
+   - **Primary**: `gpt-4.1-mini` (OpenAI). Cheap, fast, modern.
+   - **Secondary**: `anthropic/claude-haiku-4.5` via OpenRouter, as a second family.
+     We will fall back to a different OpenRouter model if Haiku 4.5 is unavailable.
+
+7. **Experiment 2 (sanity check).** Take 25 MiniARC tasks from
+   `code/cot_icl_eval/miniarc/miniarc.json`. For each, run direct vs CoT (no
+   repetition manipulation — the demos are intrinsic to the task). Report the gap.
+
+### Baselines
+- **Random / chance baseline.** Computed analytically per question type (e.g. POINT
+  has 1/(alphabet size) ≈ 0.20).
+- **K=0 direct baseline** is the natural lower-bound "no help from in-context demos".
+- **K=8 direct** is the upper-bound of within-prompt addressing capacity for our budget.
+
+### Evaluation Metrics
+- **Exact-match accuracy** per (model × condition × K × question-type) cell.
+- **95% bootstrap confidence intervals** (1000 resamples) on per-cell accuracy.
+- **Paired comparison** (McNemar test) for direct vs CoT at each K (same items,
+  paired binary outcomes).
+- **Repetition curve**: accuracy vs K, fit a logarithmic curve; report slope.
+- **Cost-normalised accuracy**: accuracy / (mean output tokens per response), to
+  account for CoT's higher token cost.
+
+### Statistical Analysis Plan
+- Primary test for H2: McNemar's exact test at each K, Bonferroni-corrected across K.
+- Primary test for H1: ordinal trend test (Cochran-Armitage / Spearman correlation of
+  K vs accuracy across pooled items).
+- Significance threshold α = 0.05.
+
+## Expected Outcomes
+- **H1 confirmed** if accuracy at K=8 ≥ K=0 with a statistically significant trend.
+- **H2 confirmed** if direct accuracy ≥ CoT accuracy at K=8 (one-sided).
+- **H3 confirmed** if accuracy at K=0 or K=1 is far from 1.0 even under CoT.
+
+## Timeline and Milestones
+- Phase 1 planning: done (this doc).
+- Phase 2 env setup: ~5 min (install openai, requests, numpy, pandas, matplotlib).
+- Phase 3 implementation: ~30 min (generator, prompting, harness, parser).
+- Phase 4 experiments: ~30–60 min API time. Budget: ≤ 1500 calls per model
+  (5 K-levels × 2 reasoning × ~150 items ≈ 1500). At gpt-4.1-mini prices
+  (~$0.40/M in, ~$1.60/M out) this is well under $5.
+- Phase 5 analysis + plots: ~20 min.
+- Phase 6 report: ~20 min.
+
+## Potential Challenges
+- **Answer parsing.** Especially for CoT, models may verbose. Mitigation: strict
+  "Final answer:" suffix in CoT prompts + tolerant regex parser + manual spot-check.
+- **API errors / rate limits.** Mitigation: exponential-backoff retry, disk-cached
+  responses keyed by hash, max-3 retries.
+- **Tokenisation of grids.** Putting spaces between cells (`. R R R .`) prevents the
+  tokenizer from merging cell symbols into bigrams.
+- **Confound: question difficulty varies across K.** Mitigation: same target question
+  *across* K levels for a given grid; only the demo padding changes. This makes
+  comparison across K within-item paired.
+
+## Success Criteria
+- All 4 experimental conditions (direct/CoT × 5 K-levels) run for both models.
+- Per-condition n ≥ 100 target questions.
+- Repetition curve and direct-vs-CoT plot present in REPORT.md with CIs.
+- At least one McNemar p-value reported.
+- A clear, hedged narrative answer to the research question.
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          LITERATURE REVIEW
+════════════════════════════════════════════════════════════════════════════════
+
+# Literature Review
+
+**Research question.** Can LLMs verbally address 2D geometries through
+prompting — especially with limited repetition — or is explicit reasoning
+(chain-of-thought, decomposition, etc.) required?
+
+By "address" we mean: refer to, identify, name, locate, or otherwise
+correctly produce output about a 2D shape presented in the prompt. By
+"novel geometries" we mean shapes the model has not encountered in
+training (irregular polygons, ARC-style symbolic grids, ad-hoc spatial
+configurations).
+
+## 1. Research-area overview
+
+Three streams of recent work bear directly on this question:
+
+1. **CoT skepticism.** A growing body of evidence (Sprague et al. 2024;
+   Zheng et al. 2025) shows chain-of-thought helps mainly on math and
+   symbolic execution. On *pattern-induction* tasks where the rule must
+   be inferred from a few demos, direct answering often beats CoT.
+2. **Spatial / shape reasoning in LLMs and MLLMs.** Both text-only LLMs
+   (Bai et al. 2025 — "Stuck in the Matrix") and multimodal models
+   (Rudman et al. 2025 — "Forgotten Polygons") fail on tasks that
+   require *actually counting* sides, vertices, or grid positions of
+   unfamiliar shapes. They fall back on memorised label associations.
+3. **Prompt-structure interventions.** Visualization-of-Thought (Wu et
+   al. 2024), VDLM/PVD (Wang et al. 2025), VC-CoT (Rudman et al. 2025),
+   and prefix-based prompting all show that the *form* of the prompt —
+   re-rendering the grid, providing a vertex schema, labelling
+   vertices — often matters more than whether explicit reasoning steps
+   are produced.
+
+The intersection — *novel* 2D geometries described *verbally*, varying
+*amount of repetition*, with/without explicit reasoning — is essentially
+the gap our research targets.
+
+## 2. Key papers
+
+### Zheng et al. 2025 — *The Curse of CoT* (TMLR'25, arXiv 2504.05081)
+- **Setup.** 16 LLMs × 9 pattern-based ICL benchmarks (ARC-AGI, MiniARC,
+  1D-ARC, RAVEN, SCAN, MiniSCAN, COGS, SALT, List-Function). Four
+  prompting paradigms: Direct, CoT, ReAct, Tree-of-Thought.
+- **Key finding.** Direct beats CoT by +20.42% relative on average,
+  +41.88% on symbolic-grid tasks. Gap *widens* with more demonstrations.
+  Even o1-style long-CoT models with 40× more inference tokens fail to
+  recover the gap.
+- **Mechanism.** A hybrid explicit/implicit reasoning model: CoT injects
+  noise via flawed rationales (explicit fails) *and* increases contextual
+  distance between demos and the answer (disrupts implicit ICL).
+- **Why central for us.** This is the strongest published evidence that
+  on novel symbolic-grid tasks (which include ARC), reasoning is *not*
+  the bottleneck — in fact it hurts. Our experiment can replicate this
+  on a controlled novel-geometry slice and extend it to a "limited
+  repetition" axis.
+
+### Sprague et al. 2025 — *To CoT or Not to CoT* (ICLR'25, arXiv 2409.12183)
+- **Setup.** Meta-analysis of 100+ CoT papers; own evaluation on 20
+  datasets × 14 LLMs across 5 reasoning categories.
+- **Finding.** CoT helps substantially only on math + symbolic. On
+  MMLU, 95% of CoT's gain comes from questions containing "=". On soft
+  reasoning, CoT is neutral or harmful.
+- **Why relevant.** Provides the *taxonomy* in which our research sits:
+  "addressing 2D geometries" is closer to *spatial/pattern induction*
+  than to *symbolic execution*, so by Sprague's taxonomy CoT is unlikely
+  to help — testable prediction for our experiment.
+
+### Rudman et al. 2025 — *Forgotten Polygons* (ACL Findings, arXiv 2502.15969)
+- **Setup.** 13 MLLMs tested on regular polygons (triangle → octagon),
+  irregular novel polygons, two-shape arithmetic, and a vision-encoder
+  embedding probe.
+- **Findings.** (a) <50% accuracy on identifying common regular polygons;
+  near-zero on novel shapes. (b) Vision encoders cluster only common
+  shapes; rare ones overlap → "shape-blindness". (c) Underlying LLMs
+  *do* know the names and side-counts when asked text-only — the failure
+  is at the perception layer. (d) **VC-CoT** (visually labelling vertices
+  with letters and asking the model to enumerate them) jumps GPT-4o from
+  7% → 93% on irregular-polygon side-counting.
+- **Why relevant.** Directly tests our "novelty" axis on shapes. Their
+  VC-CoT result is the canonical example of "addressing via labels
+  enables zero-shot success without complex reasoning" — the strongest
+  positive result for our hypothesis.
+
+### Wu et al. 2024 — *Visualization-of-Thought* (NeurIPS, arXiv 2404.03622)
+- ASCII 2D grids for navigation and tiling. VoT (re-render the grid each
+  step) significantly improves over plain CoT and even over MLLMs.
+- **Implication.** When reasoning *does* help, it's because the model is
+  forced to refresh its internal grid representation. This suggests an
+  experimental design: directly compare *re-rendering* vs. *generic
+  CoT* vs. *direct* answering on novel grid shapes.
+
+### Bai et al. 2025 — *Stuck in the Matrix* (arXiv 2510.20198)
+- Tests Claude 3.7 Sonnet (No Thinking vs 16k Thinking tokens), GPT-4o,
+  GPT-4.1 on 5 ASCII-grid spatial tasks scaled by grid size.
+- Average 42.7% accuracy drop with scale; up to 84%. Includes the
+  thinking/no-thinking contrast on a single model family — exactly the
+  comparison our hypothesis demands.
+
+### Wang et al. 2025 — *VDLM* (TMLR'25, arXiv 2404.06479)
+- Defines **Primal Visual Description (PVD)**: a JSON-style text
+  representation of 2D shapes as `{type, vertices, color, style}`.
+- A text-only LLM consuming PVD beats GPT-4V on shape comparison, mazes,
+  and other low-level reasoning tasks.
+- **Take-away.** The *form* in which a shape is verbalised matters a lot;
+  vertex-list / primitive form is a strong baseline for our experiment.
+
+### Yan et al. 2024 — *Understanding ICL from Repetitions* (ICLR, arXiv 2310.00297)
+- 10 repeats of any sequence push its predicted probability to ≈1.0,
+  even for random tokens (self-reinforcement / token co-occurrence
+  reinforcement).
+- **Implication for us.** "Limited repetition" is exactly the
+  intermediate regime where surface-pattern reinforcement starts to bite.
+  Repetition will likely *help addressing accuracy* up to a point, then
+  potentially lock in spurious patterns. We can test this directly.
+
+### Zheng et al. 2024 — *Quantifying ICL Reasoning vs Memorization* (arXiv 2405.11880)
+- Provides an axiomatic decomposition of what an LLM's ICL prediction
+  attributes to memorisation vs. reasoning.
+- **Use.** Vocabulary + metrics we can adopt when reporting which
+  fraction of accuracy on our task comes from memorised priors vs.
+  in-context induction.
+
+### Chollet 2019 — *On the Measure of Intelligence* (arXiv 1911.01547)
+- Origin of ARC-AGI. Frames novel-pattern induction as the canonical
+  test of human-like generalisation. Sets up the broader question our
+  hypothesis is a specific case of.
+
+## 3. Common methodologies in this area
+
+- **Pattern-induction prompting.** Show K input→output examples,
+  ask for the output of a held-out input. K is usually 2–10.
+- **Direct vs CoT prompting.** Same prompt; CoT adds a "reasoning"
+  slot. Both Curse-of-CoT and To-CoT-or-Not-to-CoT use this contrast.
+- **Reasoning-token sweeps.** On thinking-token models (Claude 3.7,
+  o1, DeepSeek-R1), vary the budget (0 / few-K / many-K) and watch
+  accuracy. *Stuck in the Matrix* uses this directly.
+- **Text representation variants.** Vertex lists, ASCII grids, SVG,
+  PVD JSON — all are used somewhere in the literature for "address
+  this shape" tasks.
+- **Novelty controls.** Use procedurally generated shapes (Shape-Blind
+  abstract polygons; arc_1d generator; MiniARC's hand-crafted novel
+  patterns) to ensure absence from pretraining.
+
+## 4. Standard baselines
+
+| Baseline | Source | Notes |
+|----------|--------|-------|
+| Zero-shot direct answer | most papers | trivial floor |
+| Few-shot direct answer (K=2–10) | Curse of CoT | strongest in many cases |
+| Zero/few-shot CoT ("think step by step") | Sprague et al. | usual reasoning ablation |
+| ReAct / ToT | Curse of CoT | more elaborate reasoning frameworks; usually worse on ICL |
+| Visualization-of-Thought | Wu et al. | re-render grid each step |
+| VC-CoT (label vertices, enumerate) | Rudman et al. | strongest *prompt-structure* baseline for shapes |
+| PVD-style structured input | Wang et al. | reformat the geometry rather than reformat the reasoning |
+| "Thinking tokens" on/off | Stuck in the Matrix | clean within-model reasoning contrast |
+
+## 5. Evaluation metrics
+
+- **Exact-match accuracy** on the target output (the standard for ARC
+  and Curse-of-CoT).
+- **Partial-match metrics** like Modified Levenshtein Distance (used in
+  ArtPerception for ASCII art recognition) — useful when "addressing"
+  means producing a structured description rather than a single label.
+- **Token-cost-normalised accuracy** — important if we're claiming
+  "direct ≥ CoT" given CoT's much higher inference cost.
+- **Sensitivity to repetition count** — accuracy as a function of
+  number of in-prompt repetitions (matches our hypothesis directly).
+
+## 6. Datasets we can use immediately
+
+| Dataset | Source | Novel? | Format |
+|---------|--------|--------|--------|
+| ARC-AGI | Chollet 2019 / `code/arc_agi_official` | yes (held-out) | grid JSON |
+| MiniARC | `code/cot_icl_eval/miniarc/` | yes, hand-crafted | 5×5 grid |
+| 1D-ARC | `code/cot_icl_eval/1d_arc/` | yes | 1×N grid |
+| Regular polygons | `code/shape_blind/.../regular_polygons.csv` | partly novel (rotation/colour) | image (we can transcribe) |
+| Abstract polygons | `code/shape_blind/.../abstract_shapes.csv` | yes | image |
+| arc_1d generator | `code/arc_1d/` | fully synthetic | grid |
+| Shape-Blind generators | `code/shape_blind/image_generation_code/` | controllable | image |
+
+## 7. Gaps and opportunities specific to our hypothesis
+
+- **Verbal addressing of novel 2D shapes** (not just identification of
+  named polygons) is under-studied. Most work either asks for a label or
+  a numeric answer; few ask for *referring expressions* or *position
+  descriptions* of geometric features.
+- **Repetition as an axis** is rarely treated as a free variable. Yan et
+  al. show the self-reinforcement effect but in a generation setting,
+  not in a structured pattern-induction setting. Curse-of-CoT varies the
+  demo count but treats it as a confound, not a hypothesis variable.
+- **Within-model thinking-budget sweep on novel 2D-geometry tasks** is
+  what Stuck-in-the-Matrix begins, but only for navigation-style tasks,
+  and not aligned with the repetition axis.
+
+## 8. Recommendations for our experiment
+
+Based on the literature, the strongest design is:
+
+1. **Task.** "Addressing" a 2D geometry presented as text. Two flavours:
+   (a) ARC-style grid transformations (replicating Curse-of-CoT) and
+   (b) novel polygon description (extending Forgotten-Polygons to a
+   text-only, vertex-list setting using PVD).
+2. **Conditions.**
+   - *Reasoning*: direct / CoT / thinking-budget sweep on a model that
+     supports it.
+   - *Repetition*: number of identical demonstrations in the context,
+     1, 2, 4, 8, 16. Holds task structure fixed; varies the surface
+     repetition signal.
+   - *Novelty*: 3 buckets — common shapes, rare-but-namable shapes,
+     fully procedurally novel shapes.
+3. **Baselines.** Direct (zero-shot), Direct (few-shot), CoT (zero-
+   and few-shot). Optional: VoT-style re-rendering, VC-CoT-style
+   vertex labels.
+4. **Metrics.** Exact-match accuracy, plus accuracy-per-token; sweep
+   over repetition count to test the *self-reinforcement → benefit*
+   curve.
+5. **Predictions from the literature.**
+   - On novel symbolic-grid tasks: direct ≥ CoT (Curse of CoT, To-CoT).
+   - On novel polygon-addressing: direct ≈ CoT unless labels are
+     provided; structured representation (PVD / vertex labels) is the
+     biggest lever (Forgotten Polygons, VDLM).
+   - Repetition helps up to ~3–5 copies (analogy capture) and then
+     plateaus or hurts via spurious surface reinforcement (ICL from
+     Repetitions).
+
+If the data confirms these predictions, the answer to our title is:
+**yes**, novel 2D geometries are largely addressable without reasoning,
+provided the *representation* and the *amount of repetition* are right.
+
+Sources:
+- [Curse of CoT (arXiv 2504.05081)](https://arxiv.org/abs/2504.05081)
+- [To CoT or Not to CoT (arXiv 2409.12183)](https://arxiv.org/abs/2409.12183)
+- [Forgotten Polygons (arXiv 2502.15969)](https://arxiv.org/abs/2502.15969)
+- [Visualization-of-Thought (arXiv 2404.03622)](https://arxiv.org/abs/2404.03622)
+- [Stuck in the Matrix (arXiv 2510.20198)](https://arxiv.org/abs/2510.20198)
+- [VDLM (arXiv 2404.06479)](https://arxiv.org/abs/2404.06479)
+- [ICL from Repetitions (arXiv 2310.00297)](https://arxiv.org/abs/2310.00297)
+- [Quantifying ICL Reasoning vs Memorization (arXiv 2405.11880)](https://arxiv.org/abs/2405.11880)
+- [On the Measure of Intelligence (arXiv 1911.01547)](https://arxiv.org/abs/1911.01547)
+- [Exploring Spatial Reasoning Abilities of LLMs (arXiv 2312.01054)](https://arxiv.org/abs/2312.01054)
+- [Chain-of-Thought Reasoning Without Prompting (arXiv 2402.10200)](https://arxiv.org/abs/2402.10200)
+
+
+════════════════════════════════════════════════════════════════════════════════
+                          PAPER REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+Generate a complete academic paper with the following structure:
+
+1. TITLE
+   - Clear, specific, informative
+   - Should convey main finding or contribution
+
+2. AUTHOR
+   - Use this exact author line in the \author{} block: Ari Holtzman and NeuriCo
+
+3. ABSTRACT (150-250 words)
+   - Problem statement
+   - Approach
+   - Key results
+   - Significance
+
+4. INTRODUCTION
+   - Research problem and motivation
+   - Gap in existing work
+   - Our contribution (be specific)
+   - Paper organization
+
+5. RELATED WORK
+   - Organized by theme/approach
+   - Position our work relative to prior work
+   - Cite papers from literature review
+
+6. METHODOLOGY
+   - Clear description of approach
+   - Experimental setup
+   - Datasets used
+   - Evaluation metrics
+   - Baselines
+
+7. RESULTS
+   - Present results with tables and figures
+   - Statistical analysis
+   - Comparison to baselines
+   - Ablation studies (if applicable)
+
+8. DISCUSSION
+   - Interpretation of results
+   - Limitations
+   - Broader implications
+
+9. CONCLUSION
+   - Summary of contributions
+   - Key findings
+   - Future work
+
+10. REFERENCES
+   - BibTeX format
+   - All cited papers
+
+════════════════════════════════════════════════════════════════════════════════
+                          OUTPUT FORMAT
+════════════════════════════════════════════════════════════════════════════════
+
+Create a MODULAR LaTeX project with the following directory structure:
+
+paper_draft/
+├── main.tex              # Main file that imports all sections
+├── references.bib        # BibTeX references
+├── sections/
+│   ├── abstract.tex      # Abstract content
+│   ├── introduction.tex  # Introduction section
+│   ├── related_work.tex  # Related work section
+│   ├── methodology.tex   # Methodology section
+│   ├── results.tex       # Results section
+│   ├── discussion.tex    # Discussion section
+│   └── conclusion.tex    # Conclusion section
+├── figures/              # Directory for any generated figures
+├── tables/               # Directory for complex standalone tables
+└── appendix/             # Directory for appendix sections (if needed)
+
+INSTRUCTIONS:
+1. First, create the directory structure above (mkdir -p paper_draft/sections paper_draft/figures paper_draft/tables paper_draft/appendix)
+2. Write main.tex using the EXACT preamble for NEURIPS:
+
+   \documentclass{article}
+   \usepackage[final]{neurips_2025}  % NEURIPS style (neurips_2025.sty is in paper_draft/)
+   \usepackage[hidelinks]{hyperref}  % REQUIRED: clickable links
+   \usepackage{booktabs}  % REQUIRED: professional tables
+   \usepackage{graphicx}
+   \usepackage{amsmath,amssymb}
+
+   % Import command files
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+   % Use this bibliography style:
+   \bibliographystyle{plainnat}
+
+   \author{Ari Holtzman and NeuriCo}
+
+   - Use \input{sections/...} to include each section
+   - Use \bibliography{references} for references
+3. Write each section file with COMPLETE content (no placeholders)
+4. Each section file should include its \section{} command
+5. Write references.bib with all citations in BibTeX format
+6. After writing all files, compile the paper:
+   cd paper_draft && pdflatex -interaction=nonstopmode main.tex && bibtex main && pdflatex -interaction=nonstopmode main.tex && pdflatex -interaction=nonstopmode main.tex
+
+This modular structure allows humans to easily:
+- Edit individual sections without navigating a large file
+- Track changes per section
+- Reuse sections across different paper versions
+
+════════════════════════════════════════════════════════════════════════════════
+                          QUALITY REQUIREMENTS
+════════════════════════════════════════════════════════════════════════════════
+
+- Academic tone throughout
+- All claims must be supported by data from the experiment report
+- Proper citations using \cite{} commands
+- Clear figures and tables with proper captions
+- NO placeholder text - every section must have real content
+- The paper MUST compile without errors
+- If compilation fails, debug and fix the LaTeX errors
+
+════════════════════════════════════════════════════════════════════════════════
+                          LAB WRITING STYLE
+════════════════════════════════════════════════════════════════════════════════
+
+Follow these lab-specific conventions to match our paper style:
+
+1. LANGUAGE STYLE:
+   - Use active voice: "We propose", "We examine", "We focus on"
+   - Be direct and confident: "Our main question is...", "We hypothesize that..."
+   - State things clearly and simply - prefer plain language over jargon
+   - Use bold questions as paragraph organizers: {\bf what is X?}
+   - Include specific quantitative claims: "8.97% over baseline"
+   - Avoid fancy wording: "utilize" → "use", "facilitate" → "help"
+
+2. INTRODUCTION STRUCTURE:
+   - Engaging hook (get to the point quickly)
+   - Problem importance
+   - Gap identification
+   - Your approach with method figure reference
+   - Quantitative preview of results
+   - Contribution bullets (3-4 items, action verbs)
+
+3. CONTRIBUTION LISTS:
+   \begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+       \item We propose...
+       \item We conduct...
+       \item We complement...
+   \end{itemize}
+
+4. MODULAR COMMANDS STRUCTURE:
+   Command templates are pre-copied to paper_draft/commands/:
+   - math.tex: Math notation macros
+   - general.tex: Formatting macros
+   - macros.tex: Project-specific term definitions (customize this for your paper)
+
+   In main.tex, include:
+   \input{commands/math}
+   \input{commands/general}
+   \input{commands/macros}
+
+5. REFERENCE CONVENTIONS:
+   Use reference macros from math.tex:
+   - \figref{fig:name} for "figure 1" (lowercase, in-sentence)
+   - \Figref{fig:name} for "Figure 1" (capitalized, start of sentence)
+   - \secref{sec:name} for "section 2"
+
+6. TEXT FORMATTING:
+   - Use \para{Header text} for bold paragraph headers
+   - Define method/dataset names with \textsc and \xspace:
+     \newcommand{\methodname}{\textsc{MethodName}\xspace}
+
+7. TABLE FORMATTING:
+   - Use booktabs package (no vertical lines)
+   - Use \resizebox{\textwidth}{!}{...} for wide tables
+   - Use @{} to remove padding at table edges
+   - Use \cmidrule(lr){x-y} for sub-headers
+   - Use \textsc{} for dataset/method names in headers
+   - Bold best results with {\bf ...}
+
+8. FIGURE FORMATTING:
+   - Use 0.32\textwidth for 3-column subfigures
+   - Use 0.95\linewidth for full-width figures
+   - Use \input{figures/legend} for shared legends
+   - Write self-contained captions explaining key observations
+
+9. RESULTS PRESENTATION:
+   - Define \increase and \decrease for colored arrows (green up, red down)
+   - Bold best results in tables
+   - Report confidence intervals when available
+
+10. ALGORITHM STYLING:
+    - Use algpseudocode with [noend]
+    - Use \triangleright for comments
+
+11. HYPERLINKS (REQUIRED):
+    - Always use \usepackage[hidelinks]{hyperref} or with colored links
+    - All citations, section refs, figure refs, table refs must be clickable
+    - This is essential for reader navigation
+
+════════════════════════════════════════════════════════════════════════════════
+                          WORKFLOW: REVIEW AND REFLECT
+════════════════════════════════════════════════════════════════════════════════
+
+Before calling finish, you MUST complete these review steps:
+
+1. REVIEW RESOURCES (at the start):
+   - Read .claude/skills/paper-writer/SKILL.md for detailed guidance
+   - Study templates/paper_writing/lab_style_guide.md for style conventions
+   - Browse paper_examples/ for formatting and language patterns
+
+2. SELF-REFLECTION (before finishing):
+   After writing all sections, review your work against these criteria:
+
+   LANGUAGE CHECK:
+   - [ ] Is the writing clear and jargon-free?
+   - [ ] Are claims specific with quantitative support?
+   - [ ] Is active voice used throughout?
+
+   FORMATTING CHECK:
+   - [ ] Does main.tex include \input{commands/math}, \input{commands/general}, \input{commands/macros}?
+   - [ ] Is hyperref package included for clickable references?
+   - [ ] Do tables use booktabs (no vertical lines)?
+   - [ ] Are best results bolded in tables?
+   - [ ] Are figures/tables properly captioned?
+
+   STRUCTURE CHECK:
+   - [ ] Does introduction follow: hook → importance → gap → approach → preview → contributions?
+   - [ ] Are contribution bullets specific with action verbs?
+   - [ ] Does the paper compile without errors?
+
+3. FIX ISSUES:
+   - Address any issues found in the self-reflection
+   - Re-compile and verify the PDF looks correct
+
+Only after completing this review should you consider the paper finished.

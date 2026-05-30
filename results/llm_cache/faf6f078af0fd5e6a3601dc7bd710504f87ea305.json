@@ -1,0 +1,1 @@
+{"text": "At row 3, column 0, the token is '.' (empty). The token directly to the right is at row 3, column 1, which is also '.' (empty).\n\nFinal answer: .", "model": "gpt-4.1-mini", "provider": "openai", "input_tokens": 380, "output_tokens": 43, "error": null}

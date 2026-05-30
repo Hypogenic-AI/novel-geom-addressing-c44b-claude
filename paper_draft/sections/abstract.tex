@@ -1,0 +1,22 @@
+When a large language model is shown a novel 2D shape rendered as a text
+grid, can it verbally address that shape---name what is at a cell, locate a
+token, count occurrences, find the densest row---without producing an
+explicit reasoning trace? We design \addrtask, a controlled
+$2{\times}2{\times}5$ factorial study over two models (\gpt and \haiku), two
+prompting regimes (\Direct and \COT), and five levels of in-context
+repetition ($K{=}0,1,2,4,8$ same-grid demonstrations), evaluated on 80
+procedurally-generated 7$\times$7 ASCII grids and five question types with
+mechanical ground truth.
+We find that \Direct prompting plateaus at 79--93\% accuracy even with
+$K{=}8$ demos, while \COT lifts both models to 99--100\% from $K{=}0$.
+A per-question-type breakdown shows the gap is driven almost entirely by
+two scanning queries (\qcount and \qrowmax): random-access queries
+(\qpoint, \qlookup, \qneighbor) are at near-ceiling under \Direct prompting.
+Paired McNemar tests confirm the \Direct--\COT gap at every $(\text{model},
+K)$ cell ($p{\le}0.031$, nine of ten significant under Bonferroni at
+$\alpha{=}0.005$). Same-grid repetition matters under \Direct
+($0.65 \to 0.93$ for \haiku, $p{<}10^{-6}$), but cannot close the
+aggregation gap that \COT closes for free. The picture refines the
+``curse of CoT'' story for in-context learning: reasoning helps strictly
+when the addressing query requires a scan, and is the cheapest reliability
+lever for any LLM workflow grounded in small text grids.

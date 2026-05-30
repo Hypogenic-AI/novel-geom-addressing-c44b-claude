@@ -1,0 +1,84 @@
+\section{Introduction}
+\label{sec:intro}
+
+Many practical uses of large language models embed the model in a small,
+discrete environment that is best described as a text grid: a screenshot
+serialised as ASCII, a board game state, an ARC-style puzzle, a tabular
+form. In all of these settings the model must \emph{address} the grid
+verbally---report the token at a cell, locate a feature, count
+occurrences, identify the densest row. Whether this kind of addressing
+works \emph{without} explicit step-by-step reasoning has direct
+consequences for inference cost, latency, and the design of agentic
+systems that ground decisions in serialised state.
+
+A growing body of work argues that chain-of-thought (CoT) prompting often
+hurts on in-context pattern-induction tasks~\citep{zheng2025curse,
+sprague2025tocot}, and that text-only LLMs can pick up 2D-geometric
+structure from a few in-context demonstrations~\citep{liu2025sparks}. A
+parallel line of work shows that vision-language models fail on novel
+polygons unless prompts label the geometry
+explicitly~\citep{rudman2025polygons,wang2025vdlm}. And surface-level
+repetition in the prompt is known to push next-token predictions toward
+self-reinforced patterns~\citep{yan2024repetitions}. {\bf What none of
+these threads has done is hold the geometry fixed, vary the amount of
+in-context repetition about that same geometry, and ask whether direct
+prompting can substitute for reasoning on verbal addressing of a
+\emph{novel} shape.} That intersection is the gap we close.
+
+\para{Our approach.} We design \addrtask, a controlled
+$2{\times}2{\times}5$ factorial study (\figref{fig:rep_curves}). We
+procedurally generate 80 novel 7$\times$7 ASCII grids, each containing
+one irregular shape grown by a random walk over an alphabet of four
+non-empty tokens. For every grid we issue one held-out
+target addressing question drawn from five mechanically-checkable
+question types (\qpoint, \qlookup, \qcount, \qrowmax, \qneighbor), padded
+by $K \in \{0,1,2,4,8\}$ same-grid demonstration $(Q,A)$ pairs. We sweep
+two models (\gpt, \haiku) and two prompting regimes (\Direct, \COT) at
+each $K$, for 1{,}600 total queries. The design lets us cleanly factor
+out the effect of reasoning, repetition, and query type with
+within-item paired statistics.
+
+\para{Headline result.} \Direct prompting plateaus at 79--93\% accuracy
+even at $K{=}8$, while \COT lifts both models to 99--100\% from $K{=}0$
+onward. A per-query-type breakdown reveals the cause: random-access
+queries (\qpoint, \qlookup, \qneighbor) succeed at $\ge 95\%$ accuracy
+under \Direct, while \qcount and \qrowmax---queries that require an
+iterative scan of the grid---fail 12--68\% of the time. Paired McNemar
+tests show the \Direct--\COT gap is significant at every
+$(\text{model}, K)$ cell ($p \le 0.031$), and nine of ten survive a
+Bonferroni correction over the ten paired tests. Repeating the same grid
+helps \Direct prompting (\haiku: $0.65 \to 0.93$, $p<10^{-6}$) but
+\emph{cannot} close the aggregation gap that \COT closes for free.
+
+\para{Why this matters.} Our results refine the ``curse of CoT'' story
+for in-context learning: the curse holds for rule induction but inverts
+for verbal addressing of novel geometries, with the inversion driven by
+exactly the scan-and-accumulate queries that \citet{sprague2025tocot}
+identify as the regime where CoT actually buys accuracy. For
+practitioners building LLM agents on top of grid-shaped state, enabling
+CoT is a strictly cheaper reliability lever than padding the context
+with same-grid demonstrations.
+
+\para{Contributions.}
+\begin{itemize}[leftmargin=*,itemsep=0pt,topsep=0pt]
+    \item We propose \addrtask, a procedurally-generated benchmark of
+    verbal addressing on novel 2D ASCII shapes that factors reasoning
+    against in-context repetition with within-item paired statistics.
+    \item We show that two production LLMs reach 99--100\% accuracy
+    under \COT from $K{=}0$, while \Direct prompting plateaus at
+    79--93\% even at $K{=}8$, and identify scan-based aggregation
+    queries (\qcount, \qrowmax) as the sole source of the gap.
+    \item We complement the result with a \miniarc sanity check showing
+    \gpt exhibits the opposite \Direct${>}$\COT ordering on rule
+    induction, reconciling our finding with the curse-of-CoT
+    literature: the gap depends on whether the query is
+    addressing or induction.
+    \item We release code, prompts, raw model outputs, and analysis
+    scripts at total reproducibility cost of about \$1.50.
+\end{itemize}
+
+\Secref{sec:related} surveys CoT skepticism, spatial reasoning in LLMs,
+and in-context repetition effects. \Secref{sec:method} describes
+\addrtask and the statistical analysis plan. \Secref{sec:results}
+presents the main results. \Secref{sec:discussion} interprets them and
+discusses limitations. \Secref{sec:conclusion} concludes.

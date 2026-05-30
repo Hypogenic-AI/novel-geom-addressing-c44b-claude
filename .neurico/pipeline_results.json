@@ -1,0 +1,27 @@
+{
+  "success": true,
+  "stages": {
+    "resource_finder": {
+      "success": true,
+      "completion_marker": "/workspaces/novel-geom-addressing-c44b-claude/.resource_finder_complete",
+      "outputs": {
+        "literature_review": "/workspaces/novel-geom-addressing-c44b-claude/literature_review.md",
+        "resources_catalog": "/workspaces/novel-geom-addressing-c44b-claude/resources.md",
+        "papers_dir": "/workspaces/novel-geom-addressing-c44b-claude/papers",
+        "datasets_dir": "/workspaces/novel-geom-addressing-c44b-claude/datasets",
+        "code_dir": "/workspaces/novel-geom-addressing-c44b-claude/code"
+      },
+      "log_file": "/workspaces/novel-geom-addressing-c44b-claude/logs/resource_finder_claude.log",
+      "transcript_file": "/workspaces/novel-geom-addressing-c44b-claude/logs/resource_finder_claude_transcript.jsonl",
+      "elapsed_time": 996.8543105125427
+    },
+    "experiment_runner": {
+      "success": true,
+      "return_code": 0,
+      "elapsed_time": 3229.182492494583,
+      "log_file": "/workspaces/novel-geom-addressing-c44b-claude/logs/execution_claude.log",
+      "transcript_file": "/workspaces/novel-geom-addressing-c44b-claude/logs/execution_claude_transcript.jsonl"
+    }
+  },
+  "work_dir": "/workspaces/novel-geom-addressing-c44b-claude"
+}

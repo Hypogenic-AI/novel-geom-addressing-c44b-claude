@@ -1,0 +1,66 @@
+\section{Related Work}
+\label{sec:related}
+
+Our work sits at the intersection of three recent threads: scepticism
+about chain-of-thought on in-context tasks, the limits of LLM spatial
+reasoning, and surface-repetition effects in prompts.
+
+\para{When does chain-of-thought help?}
+\citet{zheng2025curse} test 16 LLMs across nine pattern-induction
+benchmarks and report a \emph{Curse of CoT}: direct prompting beats CoT
+by 20\% on average and 42\% on symbolic-grid tasks, with the gap
+widening as more demonstrations are added. The proposed mechanism is
+that CoT injects noise via flawed rationales while increasing the
+contextual distance between demonstrations and the answer, disrupting
+the implicit ICL pathway. \citet{sprague2025tocot} provide a
+complementary meta-analysis: across 20 datasets and 14 LLMs, CoT
+substantially helps only on math and symbolic-execution tasks, with
+95\% of CoT's gain on MMLU concentrated in questions containing the
+``='' symbol. Unlike both lines, which treat pattern induction
+holistically and conclude that CoT hurts, we hold the
+geometry fixed and ask about \emph{addressing} a known grid rather than
+inducing a rule; the per-query-type analysis we report (\secref{sec:results})
+shows that the two pictures are consistent once one separates
+scan-and-aggregate queries from random-access queries.
+
+\para{LLM spatial reasoning and shape understanding.}
+\citet{rudman2025polygons} show that multimodal LLMs fall to
+near-chance accuracy on novel polygons and that perception, not
+language, is the bottleneck: their VC-CoT intervention---visually
+labelling vertices with letters and asking the model to enumerate
+them---lifts GPT-4o from 7\% to 93\% on irregular-polygon side counts.
+\citet{wang2025vdlm} introduce Primal Visual Description, a vertex/colour
+JSON schema, and show that a text-only LLM consuming PVD beats GPT-4V on
+shape comparison and maze tasks. \citet{wu2024vot} propose
+Visualization-of-Thought (VoT) for text-grid navigation, re-rendering
+the grid at each step. \citet{bai2025matrix} stress-test Claude 3.7
+Sonnet (16k thinking tokens vs.\ no-thinking), GPT-4o, and GPT-4.1 on
+five ASCII-grid spatial tasks and find accuracy drops up to 84\% as grid
+size grows. We use the same family of text-grid inputs, but our axis
+is the \emph{type of question} asked about a fixed grid rather than
+\emph{grid size} or \emph{representation}; we show that under \COT the
+question-type axis collapses to ceiling for both tested models at
+$7{\times}7$.
+
+\para{Repetition and in-context learning.}
+\citet{yan2024repetitions} show that ten repetitions of any token
+sequence push its predicted probability to ${\approx}1.0$, evidence of a
+strong self-reinforcement effect that is purely surface-statistical.
+\citet{liu2025sparks} show that LLMs pick up 2D-geometric structure
+from a few in-context $(\text{point}, \text{value})$ pairs, and
+\citet{zheng2024memorization} provide an axiomatic decomposition of
+ICL into memorisation and reasoning components. Curse-of-CoT treats
+demonstration count as a confound rather than a hypothesis variable.
+We deliberately make $K$ an axis (\cf\ \secref{sec:method}), so that
+the joint effect of reasoning and repetition can be read off the
+$2{\times}2{\times}5$ design directly. To our knowledge no prior work
+crosses verbal addressing of novel 2D shapes with both axes
+simultaneously.
+
+\para{Novelty in evaluation.}
+ARC-AGI~\citep{chollet2019measure} and its derivatives (MiniARC,
+1D-ARC) operationalise novelty through hand-crafted and synthetic
+rule families. We complement those benchmarks by generating
+\emph{shapes} rather than \emph{rules}, with a SHA1 hash on rendered
+grids ensuring no two grids in the experiment are identical, and by
+asking addressing questions rather than transformations.

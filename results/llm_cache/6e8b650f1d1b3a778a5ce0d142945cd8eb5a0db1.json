@@ -1,0 +1,1 @@
+{"text": "I need to count the non-empty cells in each row.\n\nRow 0: . . . . . .", "model": "anthropic/claude-haiku-4.5", "provider": "openrouter", "input_tokens": 187, "output_tokens": 24, "error": null}

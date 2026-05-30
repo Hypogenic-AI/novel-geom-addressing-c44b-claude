@@ -1,0 +1,5 @@
+model,reasoning,K_low,K_high,n_paired,acc_low,acc_high,only_low_correct,only_high_correct,mcnemar_p
+claude-haiku-4.5,cot,0,8,80,0.9375,1.0,0,5,0.0625
+claude-haiku-4.5,direct,0,8,80,0.65,0.925,0,22,4.76837158203125e-07
+gpt-4.1-mini,cot,0,8,80,1.0,1.0,0,0,1.0
+gpt-4.1-mini,direct,0,8,80,0.7875,0.875,1,8,0.0390625

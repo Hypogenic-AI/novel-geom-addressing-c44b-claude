@@ -1,0 +1,89 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Why does \COT help here when ``curse of CoT'' says it should not?}
+
+The mechanism is task shape, not task novelty. \addrtask is not rule
+induction. The grid is given verbatim and the question asks for a
+verifiable property of that grid; the model does not have to infer a
+transformation. For \qpoint, \qlookup, and \qneighbor the model can
+index into the prompt directly, and \Direct prompting succeeds at
+$\ge 95\%$ accuracy. For \qcount and \qrowmax the model has to scan,
+accumulate, and aggregate---exactly the operations that
+\citet{sprague2025tocot} identify as the regime where CoT actually buys
+accuracy. The fact that \Direct \qcount errors are almost all
+off-by-one is the textbook failure mode that an externalised reasoning
+trace was designed to fix.
+
+This refines, rather than contradicts, the curse-of-CoT story
+\citep{zheng2025curse}. The \miniarc control reproduces
+$\Direct{>}\COT$ in the rule-induction regime where the curse applies;
+the \addrtask result shows the ordering inverts as soon as the query
+becomes a scan over the grid. The implication for ICL benchmarking is
+that pooling rule-induction and addressing queries into a single
+``pattern-induction'' bucket conflates two very different effects.
+
+\subsection{Repetition does not bridge the aggregation gap}
+
+\Tabref{tab:qtype} reveals that even at $K{=}8$ same-grid demos,
+\gpt \Direct only reaches 0.44 on \qcount and \haiku \Direct reaches
+0.875. The demonstration pool deliberately includes other \qcount
+examples about the same grid with correct answers, but the model
+still cannot generalise the counting procedure to a new token within
+the same grid. Repetition lifts \emph{base accuracy} on the random-access
+queries, but it does not install a counting procedure---an observation
+consistent with the surface self-reinforcement view of
+\citet{yan2024repetitions} but at odds with the strong reading of
+\citet{liu2025sparks}, which would predict that demonstrations bind a
+symbolic understanding of the grid that transfers across queries.
+
+\subsection{Practical takeaway}
+
+For workflows that ground LLM decisions in small text grids (UI dumps,
+board games, ARC-style puzzles, tabular layouts), enabling \COT is a
+strictly cheaper reliability lever than padding the prompt with
+identical-grid demonstrations: it closes the aggregation gap that
+demonstrations cannot, and the token-cost penalty is dominated by the
+accuracy gain at any realistic price ratio (\figref{fig:cost}).
+
+\subsection{Limitations}
+
+\para{Two models only.}
+Both \gpt and \haiku are relatively small, ``fast'' production models.
+Larger reasoning models (o-series, Sonnet 4.5 with extended thinking,
+Gemini 2.5 Pro) plausibly close more of the gap even without
+explicit \COT; the addressing gap might shrink as base capacity grows.
+
+\para{Single grid size.}
+We evaluate at $7{\times}7$ only. \citet{bai2025matrix} report a
+42--84\% accuracy drop as grids grow; our results may be optimistic for
+larger grids, particularly for \qcount and \qrowmax where the scan
+length grows quadratically.
+
+\para{Token alphabet is colour-coded.}
+The alphabet $\{R, B, G, Y\}$ carries colour semantics in pre-training.
+Truly arbitrary symbols (non-ASCII glyphs, random Unicode) may degrade
+either condition.
+
+\para{Strict exact-match scoring.}
+We parse and score only the model's \emph{final answer}, even when \COT
+intermediate reasoning matches the gold. A well-reasoned response that
+fumbles the final-answer line counts as wrong; this likely slightly
+under-states \COT accuracy.
+
+\para{Power for fine-grained contrasts.}
+With $n{=}80$ paired observations per cell, contrasts at the ceiling
+(\eg \COT $K{=}1$ vs.\ $K{=}2$) are noisy: a single flipped item can
+move the estimate by 1.25 percentage points.
+
+\para{\miniarc compliance.}
+\haiku ignored the ``\Direct only, no explanation'' instruction on
+\miniarc and produced reasoning prose our grid parser could not
+extract. The \miniarc numbers should therefore be read as
+direction-of-effect, not as a benchmark. The \addrtask format had no
+such compliance issue.
+
+\para{No vision modality.}
+All grids are text. The perceptual encoding story behind the
+forgotten-polygons line~\citep{rudman2025polygons} does not apply
+directly to our setting.

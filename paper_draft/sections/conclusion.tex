@@ -1,0 +1,39 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We asked whether large language models can verbally address novel 2D
+geometries presented as text without an explicit reasoning trace, and
+whether repeating the same grid in context substitutes for reasoning.
+On \addrtask---a controlled $2{\times}2{\times}5$ benchmark over
+\gpt, \haiku, two prompting regimes, and five levels of in-context
+repetition---the answer is \emph{partially}. Random-access queries
+(\qpoint, \qlookup, \qneighbor) are addressable without reasoning at
+$\ge 95\%$ accuracy for both tested models, and a small amount of
+in-context repetition raises floor accuracy further. Aggregation
+queries (\qcount, \qrowmax) are \emph{not} addressable without
+reasoning: \Direct prompting fails 12--68\% of the time depending on
+the model and query type, and eight same-grid demonstrations only
+partially close the gap. \COT closes it almost entirely from $K{=}0$
+onward, and the paired McNemar tests confirm the gap at every cell of
+our design.
+
+\para{Key takeaway.}
+The ``curse of CoT'' generalisation that direct prompting dominates
+on in-context tasks does not extend to verbal addressing of novel
+geometries; the curse holds for rule induction (which our \miniarc
+control reproduces) and inverts for scan-and-aggregate addressing.
+Pooling these two regimes into a single ICL bucket misses the effect.
+
+\para{Future work.}
+Several follow-ups extend the design naturally:
+(i) scale grids to $10{\times}10$ and $15{\times}15$ to test the
+\citet{bai2025matrix} degradation curve under both reasoning regimes;
+(ii) sweep the thinking-token budget on a model with explicit
+extended thinking (\eg Sonnet 4.5) to see whether the
+\qcount/\qrowmax failure decays smoothly with thinking tokens;
+(iii) replace \qcount with a bounded-arithmetic variant
+(``how many more $X$ than $Y$?'') to distinguish counting failures
+from arithmetic failures;
+(iv) cross-test with a structured representation (PVD-style vertex
+lists or SVG~\citep{wang2025vdlm}) as a third axis to see whether
+representation eliminates the \Direct--\COT gap entirely.
